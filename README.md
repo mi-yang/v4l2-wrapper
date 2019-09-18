@@ -8,13 +8,12 @@
   provide two ways to get image frame
 * query
 
-  `
-  V4l2Camera webcam("/dev/video0");<br>
-  webcam.openCameraDevice(640, 480, V4L2_PIX_FMT_MJPEG);<br>
+  ```javascript
+  V4l2Camera webcam("/dev/video0");
+  webcam.openCameraDevice(640, 480, V4L2_PIX_FMT_MJPEG);
   grabAndRender(webcam, 60*5, fmt); //60*5 seconds
-  
   webcam.closeCameraDevice();
-  `
+  ```
 
 * callback
 
