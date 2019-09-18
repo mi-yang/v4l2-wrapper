@@ -1,5 +1,6 @@
 # v4l2-wrapper
 a simple c++ wrapper of v4l2
+
 #dependences:
 pthread opencv-core opencv-highgui
 #usage
