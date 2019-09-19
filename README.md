@@ -20,7 +20,7 @@
   ```javascript
   V4l2Camera webcam("/dev/video0");
   webcam.openCameraDevice(640, 480, V4L2_PIX_FMT_MJPEG);
-  webcam.startStreaming(cb, &webcam);
+  webcam.startStreaming(callback, &webcam);
   sleep(60*5);
   webcam.stopStreaming();
   webcam.closeCameraDevice();
