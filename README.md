@@ -1,8 +1,14 @@
 # v4l2-wrapper
- a simple c++ wrapper of v4l2
+ a simple c++ wrapper of v4l2 add capture mplane support
+ cross build on rk3288
+
+# build:
+ 1. change cross build tool chain path in Makefile
+ 2. make clean && make
+  
 
 # dependences:
- pthread opencv-core opencv-highgui
+ pthread 
 
 # usage:
   provide two ways to get image frame
@@ -11,7 +17,7 @@
   ```javascript
   V4l2Camera webcam("/dev/video0");
   webcam.openCameraDevice(640, 480, V4L2_PIX_FMT_MJPEG);
-  grabAndRender(webcam, 60*5, fmt); //60*5 seconds
+  grabAndSaveWithTimeout(webcam,2);//grab 2 seconds and save each frame to file
   webcam.closeCameraDevice();
   ```
 
@@ -20,8 +26,7 @@
   ```javascript
   V4l2Camera webcam("/dev/video0");
   webcam.openCameraDevice(640, 480, V4L2_PIX_FMT_MJPEG);
-  webcam.startStreaming(cb, &webcam);
-  sleep(60*5);
+  grabAndSaveWithTimeoutByCallback(webcam, 10,onFrameGrab);//grab 10 seconds and save each frame to file
   webcam.stopStreaming();
   webcam.closeCameraDevice();
   ```
