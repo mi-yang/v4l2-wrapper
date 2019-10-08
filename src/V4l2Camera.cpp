@@ -138,7 +138,7 @@ int V4l2Camera::startCapturing()
 	DBG("startCapturing \n");
 	unsigned int i;
 	enum v4l2_buf_type type;
-	for (i = 0; i < NB_BUFFER; ++i)
+	for (i = 0; i < NB_BUFFER; i++)
 	{
 		struct v4l2_buffer buf;
 		CLEAR(buf);
@@ -198,7 +198,7 @@ int V4l2Camera::initMmap()
 		return -1;
 	}
 	int n_buffers = 0;
-	for (n_buffers = 0; n_buffers < req.count; ++n_buffers)
+	for (n_buffers = 0; n_buffers < req.count;n_buffers++)
 	{
 		struct v4l2_buffer buf;
 		struct v4l2_plane planes[FMT_NUM_PLANES];

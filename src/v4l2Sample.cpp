@@ -11,6 +11,7 @@
 #include <fstream>
 #include <stdio.h>
 #include <unistd.h>
+#include <stdlib.h>
 #include "V4l2Camera.h"
 #include "utils.h"
 
