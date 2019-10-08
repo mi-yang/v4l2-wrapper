@@ -1,4 +1,6 @@
-CC=g++
+SDK_DIR=/home/mi/sandbox/rk3288_sdk
+TOOL_DIR=$(SDK_DIR)/prebuilts/gcc/linux-x86/arm/gcc-linaro-6.3.1-2017.05-x86_64_arm-linux-gnueabihf
+CC=$(TOOL_DIR)/bin/arm-linux-gnueabihf-g++
 ROOT=.
 #PROJDIR=$(ROOT)/..
 OBJDIR=$(ROOT)/obj
@@ -22,7 +24,7 @@ OBJS:=$(patsubst %.cpp,$(OBJDIR)/%.o,$(file))
  
 #INCS=-I$(PROJDIR)/common/inc
 LDFLAGS=
-LIBS := -lopencv_core -lpthread -lopencv_highgui
+LIBS := -lpthread 
 
 CFLAGS+=$(INCS)
  
@@ -37,7 +39,7 @@ OUT_DIR:
 $(TARGET):$(OBJS)
 	@echo 'Building target: $@'
 	@echo 'Invoking: GCC C++ Linker'
-	g++  -o $@ $(OBJS) $(LIBS)
+	$(CC) -o $@ $(OBJS) $(LIBS)
 	@echo 'Finished building target: $@'
 	@echo ' '
 $(OBJS):$(SRCS)
@@ -46,4 +48,4 @@ $(OBJS):$(SRCS)
 
 clean:
 	@echo "make" $(TARGET) "clean"
-	rm -f $(OBJDIR)/*.a $(OBJDIR)/*.o
+	rm -f $(OBJDIR)/*.a $(OBJDIR)/*.o $(TARGET)

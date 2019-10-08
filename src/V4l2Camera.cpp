@@ -17,17 +17,28 @@
 #include <unistd.h>
 #include <time.h>
 
+#define CLEAR(x) memset(&(x), 0, sizeof(x))
+static int xioctl(int fh, int request, void *arg)
+{
+	int r;
+	do
+	{
+		r = ioctl(fh, request, arg);
+	} while (-1 == r && EINTR == errno);
+	return r;
+}
 V4l2Camera::V4l2Camera(const char* device, int width, int height) :
 		m_width(width), m_height(height)
 {
 	m_user_buf = NULL;
 	m_user_cb = NULL;
 	m_user_ptr = NULL;
-	m_fps = 30;
+	//m_fps = 30;
 	m_format = V4L2_PIX_FMT_YUYV;
 	m_fd = -1;
 	m_isStreaming = false;
 	m_worker = -1;
+	m_buf_type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
 	memset(m_device, 0, 50);
 	int len = strlen(device);
 	if (len > 50)
@@ -52,16 +63,15 @@ void V4l2Camera::freeFrame(v4l2_frame_t *frame)
 void V4l2Camera::stopCapturing()
 {
 	enum v4l2_buf_type type;
-	type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-	if(m_isStreaming == false)
+	type = m_buf_type;
+	if (m_isStreaming == false)
 		return;
 	m_isStreaming = false;
-	if (-1 == ioctl(m_fd, VIDIOC_STREAMOFF, &type))
+	if (-1 == xioctl(m_fd, VIDIOC_STREAMOFF, &type))
 	{
 		perror("Fail to ioctl 'VIDIOC_STREAMOFF'");
 		return;
 	}
-	return;
 }
 void V4l2Camera::workerCleanup(void *arg)
 {
@@ -74,8 +84,6 @@ int V4l2Camera::grabRoutine()
 	v4l2_frame_t *frame = NULL;
 	while (m_isStreaming)
 	{
-		//pthread_testcancel();
-		//DBG("grab.....%d\n",m_isStreaming);
 		if (m_user_cb != NULL)
 		{
 			res = grabFrame(&frame);
@@ -94,7 +102,6 @@ int V4l2Camera::grabRoutine()
 			}
 		}
 	}
-	//DBG("grab routine end \n");
 	return res;
 }
 void* V4l2Camera::workerThread(void *arg)
@@ -112,107 +119,127 @@ int V4l2Camera::startStreaming(v4l2_frame_callback_t *cb, void *user_ptr)
 	startCapturing();
 	pthread_create(&m_worker, 0, workerThread, this);
 	//pthread_detach(m_worker);
-	return m_worker;
+	return 0;
 }
 int V4l2Camera::stopStreaming()
 {
-	 //DBG("stop stream\n");
-	 stopCapturing();
-	 //pthread_cancel(m_worker);
-	 void *status = NULL;
-	 pthread_join(m_worker,&status);
-	 m_user_cb = NULL;
-	 m_user_ptr = NULL;
-	 return 0;
+	//DBG("stop stream\n");
+	stopCapturing();
+	//pthread_cancel(m_worker);
+	void *status = NULL;
+	pthread_join(m_worker, &status);
+	m_user_cb = NULL;
+	m_user_ptr = NULL;
+	return 0;
 }
 
 int V4l2Camera::startCapturing()
 {
+	DBG("startCapturing \n");
 	unsigned int i;
 	enum v4l2_buf_type type;
-	if(m_isStreaming == true)
-		return 0;
-	m_isStreaming = true;
-	//将申请的内核缓冲区放入一个队列中
-	for (i = 0; i < NB_BUFFER; i++)
+	for (i = 0; i < NB_BUFFER; ++i)
 	{
 		struct v4l2_buffer buf;
-
-		bzero(&buf, sizeof(buf));
-		buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+		CLEAR(buf);
+		buf.type = m_buf_type;
 		buf.memory = V4L2_MEMORY_MMAP;
 		buf.index = i;
-		if (-1 == ioctl(m_fd, VIDIOC_QBUF, &buf))
+		if (V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE == m_buf_type)
 		{
-			perror("Fail to ioctl 'VIDIOC_QBUF'");
+			struct v4l2_plane planes[FMT_NUM_PLANES];
+			buf.m.planes = planes;
+			buf.length = FMT_NUM_PLANES;
+		}
+		if (-1 == xioctl(m_fd, VIDIOC_QBUF, &buf))
+		{
+			printf("VIDIOC_QBUF\n");
 			return -1;
 		}
-	}
 
-	//开始采集数据
-	type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-	if (-1 == ioctl(m_fd, VIDIOC_STREAMON, &type))
+	}
+	type = m_buf_type;
+	if (-1 == xioctl(m_fd, VIDIOC_STREAMON, &type))
 	{
-		printf("i = %d.\n", i);
-		perror("Fail to ioctl 'VIDIOC_STREAMON'");
+		printf("VIDIOC_STREAMON \n");
 		return -1;
 	}
+
+	m_isStreaming = true;
 	return 0;
 }
 int V4l2Camera::initMmap()
 {
-	int i = 0;
-	struct v4l2_requestbuffers reqbuf;
+	struct v4l2_requestbuffers req;
+	CLEAR(req);
 
-	bzero(&reqbuf, sizeof(reqbuf));
-	reqbuf.count = NB_BUFFER;
-	reqbuf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-	reqbuf.memory = V4L2_MEMORY_MMAP;
-	//申请视频缓冲区(这个缓冲区位于内核空间，需要通过mmap映射)
-	//这一步操作可能会修改reqbuf.count的值，修改为实际成功申请缓冲区个数
-	if (-1 == ioctl(m_fd, VIDIOC_REQBUFS, &reqbuf))
+	req.count = NB_BUFFER;
+	req.type = m_buf_type;
+	req.memory = V4L2_MEMORY_MMAP;
+
+	if (-1 == xioctl(m_fd, VIDIOC_REQBUFS, &req))
 	{
-		perror("Fail to ioctl 'VIDIOC_REQBUFS'");
+		printf("%s does not support "
+				"memory mapping\n", m_device);
 		return -1;
 	}
 
-	//n_buffer = reqbuf.count;
-	m_user_buf = (user_buffer_t*) calloc(reqbuf.count, sizeof(*m_user_buf));
-	if (m_user_buf == NULL)
+	if (req.count < 2)
 	{
-		fprintf(stderr, "Out of memory\n");
+		printf("Insufficient buffer memory on %s\n", m_device);
 		return -1;
 	}
 
-	//将内核缓冲区映射到用户进程空间
-	for (i = 0; i < (int)reqbuf.count; i++)
+	m_user_buf = (user_buffer_t*) calloc(req.count, sizeof(*m_user_buf));
+
+	if (!m_user_buf)
+	{
+		printf("Out of memory\n");
+		return -1;
+	}
+	int n_buffers = 0;
+	for (n_buffers = 0; n_buffers < req.count; ++n_buffers)
 	{
 		struct v4l2_buffer buf;
-		bzero(&buf, sizeof(buf));
-		buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+		struct v4l2_plane planes[FMT_NUM_PLANES];
+		CLEAR(buf);
+		CLEAR(planes);
+
+		buf.type = m_buf_type;
 		buf.memory = V4L2_MEMORY_MMAP;
-		buf.index = i;
+		buf.index = n_buffers;
 
-		//查询申请到内核缓冲区的信息
-		if (-1 == ioctl(m_fd, VIDIOC_QUERYBUF, &buf))
+		if (V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE == m_buf_type)
 		{
-			perror("Fail to ioctl : VIDIOC_QUERYBUF");
-			return -1;
-			//exit(EXIT_FAILURE);
+			buf.m.planes = planes;
+			buf.length = FMT_NUM_PLANES;
 		}
 
-		m_user_buf[i].length = buf.length;
-		m_user_buf[i].start = mmap(
-		NULL,/*start anywhere*/
-		buf.length,
-		PROT_READ | PROT_WRITE,
-		MAP_SHARED, m_fd, buf.m.offset);
-
-		if (MAP_FAILED == m_user_buf[i].start)
+		if (-1 == xioctl(m_fd, VIDIOC_QUERYBUF, &buf))
 		{
-			perror("Fail to mmap");
+			printf("VIDIOC_QUERYBUF");
 			return -1;
 		}
+
+		if (V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE == m_buf_type)
+		{
+			m_user_buf[n_buffers].length = buf.m.planes[0].length;
+			m_user_buf[n_buffers].start = mmap(NULL /* start anywhere */,
+					buf.m.planes[0].length,
+					PROT_READ | PROT_WRITE /* required */,
+					MAP_SHARED /* recommended */, m_fd,
+					buf.m.planes[0].m.mem_offset);
+		}
+		else
+		{
+			m_user_buf[n_buffers].length = buf.length;
+			m_user_buf[n_buffers].start = mmap(NULL /* start anywhere */,
+					buf.length, PROT_READ | PROT_WRITE /* required */,
+					MAP_SHARED /* recommended */, m_fd, buf.m.offset);
+		}
+
+		if (MAP_FAILED == m_user_buf[n_buffers].start)
+			return -1;
 	}
 
 	return 0;
@@ -220,7 +247,6 @@ int V4l2Camera::initMmap()
 void V4l2Camera::uninitDevice()
 {
 	unsigned int i;
-
 	for (i = 0; i < NB_BUFFER; i++)
 	{
 		if (-1 == munmap(m_user_buf[i].start, m_user_buf[i].length))
@@ -245,55 +271,49 @@ void V4l2Camera::closeCameraDevice()
 }
 int V4l2Camera::initDevice()
 {
-	struct v4l2_fmtdesc fmt;
+	DBG("init_device\n");
 	struct v4l2_capability cap;
-	struct v4l2_format stream_fmt;
-	int ret;
+	struct v4l2_format fmt;
 
-	//当前视频设备支持的视频格式
-	memset(&fmt, 0, sizeof(fmt));
-	fmt.index = 0;
-	fmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-
-	//查询视频设备驱动的功能
-	ret = ioctl(m_fd, VIDIOC_QUERYCAP, &cap);
-	if (ret < 0)
+	if (-1 == xioctl(m_fd, VIDIOC_QUERYCAP, &cap))
 	{
 		perror("FAIL to ioctl VIDIOC_QUERYCAP");
 		return -1;
-		//exit(EXIT_FAILURE);
 	}
 
-	//判断是否是一个视频捕捉设备
-	if (!(cap.capabilities & V4L2_BUF_TYPE_VIDEO_CAPTURE))
+	if (!(cap.capabilities & V4L2_CAP_VIDEO_CAPTURE)
+			&& !(cap.capabilities & V4L2_CAP_VIDEO_CAPTURE_MPLANE))
 	{
-		printf("The Current device is not a video capture device\n");
+		fprintf(stderr, "%s is not a video capture device, capabilities: %x\n",
+				m_device, cap.capabilities);
 		return -1;
-		//exit(EXIT_FAILURE);
 	}
 
-	//判断是否支持视频流形式
 	if (!(cap.capabilities & V4L2_CAP_STREAMING))
 	{
 		printf("The Current device does not support streaming i/o\n");
 		return -1;
-		//exit(EXIT_FAILURE);
 	}
 
-	//设置摄像头采集数据格式，如设置采集数据的
-	//长,宽，图像格式(JPEG,YUYV,MJPEG等格式)
-	stream_fmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-	stream_fmt.fmt.pix.width = m_width;
-	stream_fmt.fmt.pix.height = m_height;
-	stream_fmt.fmt.pix.pixelformat = m_format;
-	stream_fmt.fmt.pix.field = V4L2_FIELD_INTERLACED;
+	if (cap.capabilities & V4L2_CAP_VIDEO_CAPTURE)
+		m_buf_type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+	else if (cap.capabilities & V4L2_CAP_VIDEO_CAPTURE_MPLANE)
+		m_buf_type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
 
-	if (-1 == ioctl(m_fd, VIDIOC_S_FMT, &stream_fmt))
+	CLEAR(fmt);
+	fmt.type = m_buf_type;
+	fmt.fmt.pix.width = m_width;
+	fmt.fmt.pix.height = m_height;
+	fmt.fmt.pix.pixelformat = m_format;
+	fmt.fmt.pix.field = V4L2_FIELD_INTERLACED;
+
+	if (-1 == xioctl(m_fd, VIDIOC_S_FMT, &fmt))
 	{
 		perror("Fail to ioctl set format");
 		return -1;
 	}
 
+	DBG("buf type %d\n", m_buf_type);
 	//初始化视频采集方式(mmap)
 	initMmap();
 
@@ -309,14 +329,6 @@ int V4l2Camera::openCameraDevice(int width, int height, uint32_t format)
 	}
 
 	m_format = format;
-	if (m_format == V4L2_PIX_FMT_YUYV)
-	{
-		DBG("resolution:%dx%d YUYV\n", m_width, m_height);
-	}
-	else
-	{
-		DBG("resolution:%dx%d MJPEG\n", m_width, m_height);
-	}
 	if ((m_fd = open(m_device, O_RDWR | O_NONBLOCK)) < 0)
 	{
 		DBG("Fail to open\n");
@@ -325,7 +337,7 @@ int V4l2Camera::openCameraDevice(int width, int height, uint32_t format)
 	memset(&cap, 0, sizeof cap);
 	if (ioctl(m_fd, VIDIOC_QUERYCAP, &cap) < 0)
 	{
-		printf("Error opening device /dev/video0 : unable to query device.\n");
+		printf("Error opening device %s : unable to query device.\n", m_device);
 		close(m_fd);
 		return -1;
 	}
@@ -345,8 +357,6 @@ v4l2_frame_t* V4l2Camera::allocateFrame(int data_bytes)
 	if (!frame)
 		return NULL;
 	memset(frame, 0, sizeof(*frame));
-	//frame->library_owns_data = 1;
-
 	if (data_bytes > 0)
 	{
 		frame->data_bytes = data_bytes;
@@ -367,10 +377,200 @@ void V4l2Camera::createFrame(char* data, int len, v4l2_frame_t** frame)
 	memcpy(f->data, data, len);
 	f->width = m_width;
 	f->height = m_height;
-	//f->frame_format = V4L2_PIX_FMT_YUYV;
 	f->data_bytes = len;
 	*frame = f;
 }
+#if 0
+/* return >= 0 ok otherwhise -1 */
+int V4l2Camera::isv4l2Control(int control, struct v4l2_queryctrl *queryctrl)
+{
+	int err = 0;
+	queryctrl->id = control;
+	if ((err = ioctl(m_fd, VIDIOC_QUERYCTRL, queryctrl)) < 0)
+	{
+		DBG("ioctl querycontrol error %d \n", errno);
+	}
+	else if (queryctrl->flags & V4L2_CTRL_FLAG_DISABLED)
+	{
+		DBG("control %s disabled \n", (char * ) queryctrl->name);
+	}
+	else if (queryctrl->flags & V4L2_CTRL_TYPE_BOOLEAN)
+	{
+		return 1;
+	}
+	else if (queryctrl->type & V4L2_CTRL_TYPE_INTEGER)
+	{
+		return 0;
+	}
+	else
+	{
+		DBG("contol %s unsupported  \n", (char * ) queryctrl->name);
+	}
+	return -1;
+}
+
+/*==================================================================
+ * Function  : v4l2GetControl
+ * Description : get v4l2 control value
+ * Input Para  : para1:control id,para2 control value
+ * Output Para :
+ * Return Value: -1 error -2 not support 0 success
+ ==================================================================*/
+int V4l2Camera::v4l2GetControl(int control,control_value_t* ctr)
+{
+	struct v4l2_queryctrl queryctrl;
+	struct v4l2_control control_s;
+	int err;
+	if (isv4l2Control(control, &queryctrl) < 0)
+	return -2;
+	control_s.id = control;
+	if ((err = ioctl(m_fd, VIDIOC_G_CTRL, &control_s)) < 0)
+	{
+		DBG("ioctl get control error\n");
+		return -1;
+	}
+	(*ctr).value = control_s.value;
+	(*ctr).def = queryctrl.default_value;
+	(*ctr).max = queryctrl.maximum;
+	(*ctr).min = queryctrl.minimum;
+	(*ctr).step = queryctrl.step;
+	return 0;
+}
+/*==================================================================
+ * Function  : getFps
+ * Description : get stream fps
+ * Input Para  : fps
+ * Output Para :
+ * Return Value: -1 error 0 success
+ ==================================================================*/
+int V4l2Camera::getFps(int* fps)
+{
+	int ret = 0;
+	struct v4l2_streamparm *setfps = NULL;
+	setfps = (struct v4l2_streamparm *) calloc(1,
+			sizeof(struct v4l2_streamparm));
+	memset(setfps, 0, sizeof(struct v4l2_streamparm));
+	setfps->type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+	ret = ioctl(m_fd, VIDIOC_G_PARM, setfps);
+	if (ret == 0)
+	{
+		*fps = setfps->parm.capture.timeperframe.denominator;
+	}
+	else
+	{
+		perror("Unable to query that the FPS change is supported\n");
+		ret = -1;
+	}
+	if (setfps != NULL)
+	{
+		free(setfps);
+		setfps = NULL;
+	}
+	return ret;
+}
+/*==================================================================
+ * Function  : setFps
+ * Description : set stream fps
+ * Input Para  : fps
+ * Output Para :
+ * Return Value: -1 error 0 success
+ ==================================================================*/
+int V4l2Camera::setFps(int fps)
+{
+	struct v4l2_streamparm *setfps = NULL;
+	int ret = 0;
+	setfps = (struct v4l2_streamparm *) calloc(1,
+			sizeof(struct v4l2_streamparm));
+	memset(setfps, 0, sizeof(struct v4l2_streamparm));
+	setfps->type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+	/*
+	 * first query streaming parameters to determine that the FPS selection is supported
+	 */
+	do
+	{
+		ret = ioctl(m_fd, VIDIOC_G_PARM, setfps);
+		if (ret == 0)
+		{
+			if (setfps->parm.capture.capability & V4L2_CAP_TIMEPERFRAME)
+			{
+				memset(setfps, 0, sizeof(struct v4l2_streamparm));
+				setfps->type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+				setfps->parm.capture.timeperframe.numerator = 1;
+				setfps->parm.capture.timeperframe.denominator = fps;
+				ret = ioctl(m_fd, VIDIOC_S_PARM, setfps);
+				if (ret)
+				{
+					perror("Unable to set the FPS\n");
+					ret = -1;
+					break;
+				}
+				else
+				{
+					if (fps != setfps->parm.capture.timeperframe.denominator)
+					{
+						printf("FPS coerced ......: from %d to %d\n", fps,
+								setfps->parm.capture.timeperframe.denominator);
+						ret = -1;
+						break;
+					}
+					ret = 0;
+					break;
+				}
+			}
+			else
+			{
+				perror(
+						"Setting FPS on the capture device is not supported, fallback to software framedropping\n");
+				return -1;
+			}
+		}
+		else
+		{
+			perror("Unable to query that the FPS change is supported\n");
+			ret= -1;
+			break;
+		}
+	}while (0);
+
+	if(setfps != NULL)
+	{
+		free(setfps);
+		setfps = NULL;
+	}
+	return ret;
+}
+/*==================================================================
+ * Function  : v4l2SetControl
+ * Description : set v4l2 control value
+ * Input Para  : para1:control id para2:contorl value
+ * Output Para :
+ * Return Value: -1 error 0 success -2 not support
+ ==================================================================*/
+int V4l2Camera::v4l2SetControl(int control, int value)
+{
+	struct v4l2_control control_s;
+	struct v4l2_queryctrl queryctrl;
+	int min, max, step, val_def;
+	int err;
+	if (isv4l2Control(control, &queryctrl) < 0)
+	return -2;
+	min = queryctrl.minimum;
+	max = queryctrl.maximum;
+	step = queryctrl.step;
+	val_def = queryctrl.default_value;
+	if ((value >= min) && (value <= max))
+	{
+		control_s.id = control;
+		control_s.value = value;
+		if ((err = ioctl(m_fd, VIDIOC_S_CTRL, &control_s)) < 0)
+		{
+			DBG("ioctl set control error\n");
+			return -1;
+		}
+	}
+	return 0;
+}
+#endif
 int V4l2Camera::grabFrame(v4l2_frame_t** frame)
 {
 	fd_set fds;
@@ -394,8 +594,16 @@ int V4l2Camera::grabFrame(v4l2_frame_t** frame)
 		}
 	}
 	bzero(&buf, sizeof(buf));
-	buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+	buf.type = m_buf_type;
 	buf.memory = V4L2_MEMORY_MMAP;
+
+	if (V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE == m_buf_type)
+	{
+		struct v4l2_plane planes[FMT_NUM_PLANES];
+		buf.m.planes = planes;
+		buf.length = FMT_NUM_PLANES;
+	}
+
 	//从队列中取缓冲区
 	if (-1 == ioctl(m_fd, VIDIOC_DQBUF, &buf))
 	{
@@ -404,7 +612,19 @@ int V4l2Camera::grabFrame(v4l2_frame_t** frame)
 	}
 	seq = buf.sequence;
 	timestamp = buf.timestamp;
-	createFrame((char*) m_user_buf[buf.index].start, buf.bytesused, &f);
+
+	if (V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE == m_buf_type)
+	{
+		//DBG("multi-planes bytesused %d\n", buf.m.planes[0].bytesused);
+		createFrame((char*) m_user_buf[buf.index].start,
+				buf.m.planes[0].bytesused, &f);
+	}
+	else
+	{
+		//DBG("bytesused %d\n", buf.bytesused);
+		createFrame((char*) m_user_buf[buf.index].start, buf.bytesused, &f);
+	}
+
 	if (-1 == ioctl(m_fd, VIDIOC_QBUF, &buf))
 	{
 		perror("Fail to ioctl 'VIDIOC_QBUF'");
