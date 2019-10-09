@@ -33,7 +33,7 @@ V4l2Camera::V4l2Camera(const char* device, int width, int height) :
 	m_user_buf = NULL;
 	m_user_cb = NULL;
 	m_user_ptr = NULL;
-	//m_fps = 30;
+	m_fps = 30;
 	m_format = V4L2_PIX_FMT_YUYV;
 	m_fd = -1;
 	m_isStreaming = false;
@@ -380,7 +380,7 @@ void V4l2Camera::createFrame(char* data, int len, v4l2_frame_t** frame)
 	f->data_bytes = len;
 	*frame = f;
 }
-#if 0
+
 /* return >= 0 ok otherwhise -1 */
 int V4l2Camera::isv4l2Control(int control, struct v4l2_queryctrl *queryctrl)
 {
@@ -450,7 +450,7 @@ int V4l2Camera::getFps(int* fps)
 	setfps = (struct v4l2_streamparm *) calloc(1,
 			sizeof(struct v4l2_streamparm));
 	memset(setfps, 0, sizeof(struct v4l2_streamparm));
-	setfps->type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+	setfps->type = m_buf_type;
 	ret = ioctl(m_fd, VIDIOC_G_PARM, setfps);
 	if (ret == 0)
 	{
@@ -479,10 +479,9 @@ int V4l2Camera::setFps(int fps)
 {
 	struct v4l2_streamparm *setfps = NULL;
 	int ret = 0;
-	setfps = (struct v4l2_streamparm *) calloc(1,
-			sizeof(struct v4l2_streamparm));
+	setfps = (struct v4l2_streamparm *) calloc(1,sizeof(struct v4l2_streamparm));
 	memset(setfps, 0, sizeof(struct v4l2_streamparm));
-	setfps->type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+	setfps->type = m_buf_type;
 	/*
 	 * first query streaming parameters to determine that the FPS selection is supported
 	 */
@@ -494,7 +493,7 @@ int V4l2Camera::setFps(int fps)
 			if (setfps->parm.capture.capability & V4L2_CAP_TIMEPERFRAME)
 			{
 				memset(setfps, 0, sizeof(struct v4l2_streamparm));
-				setfps->type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+				setfps->type = m_buf_type;
 				setfps->parm.capture.timeperframe.numerator = 1;
 				setfps->parm.capture.timeperframe.denominator = fps;
 				ret = ioctl(m_fd, VIDIOC_S_PARM, setfps);
@@ -553,7 +552,7 @@ int V4l2Camera::v4l2SetControl(int control, int value)
 	int min, max, step, val_def;
 	int err;
 	if (isv4l2Control(control, &queryctrl) < 0)
-	return -2;
+		return -2;
 	min = queryctrl.minimum;
 	max = queryctrl.maximum;
 	step = queryctrl.step;
@@ -570,7 +569,6 @@ int V4l2Camera::v4l2SetControl(int control, int value)
 	}
 	return 0;
 }
-#endif
 int V4l2Camera::grabFrame(v4l2_frame_t** frame)
 {
 	fd_set fds;

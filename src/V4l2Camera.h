@@ -74,10 +74,10 @@ public:
 	v4l2_frame_t * allocateFrame(int data_bytes);
 	int startStreaming(v4l2_frame_callback_t *cb, void *user_ptr);
 	int stopStreaming();
-	//int v4l2GetControl(int control,control_value_t* ctr);
-	//int v4l2SetControl(int control, int value);
-	//int setFps(int fps);
-	//int getFps(int* fps);
+	int v4l2GetControl(int control,control_value_t* ctr);
+	int v4l2SetControl(int control, int value);
+	int setFps(int fps);
+	int getFps(int* fps);
 	virtual ~V4l2Camera();
 
 private:
@@ -87,7 +87,7 @@ private:
 	void stopCapturing();
 	void uninitDevice();
 	int grabRoutine();
-	//int isv4l2Control(int control,struct v4l2_queryctrl *queryctrl);
+	int isv4l2Control(int control,struct v4l2_queryctrl *queryctrl);
 	void createFrame(char* data, int len, v4l2_frame_t** frame);
 	user_buffer_t* m_user_buf;
 	static void workerCleanup(void *arg);//线程清理函数
@@ -97,7 +97,7 @@ private:
 	int m_fd;
 	int m_width;
 	int m_height;
-	//int m_fps;
+	int m_fps;
 	bool m_isStreaming;
 	v4l2_frame_callback_t *m_user_cb;
 	void *m_user_ptr;
