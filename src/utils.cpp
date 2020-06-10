@@ -5,6 +5,7 @@ static inline unsigned char sat(int i)
 {
 	return (unsigned char) (i >= 255 ? 255 : (i < 0 ? 0 : i));
 }
+
 #define IYUYV2BGR_2(pyuv, pbgr) { \
     int r = (22987 * ((pyuv)[3] - 128)) >> 14; \
     int g = (-5636 * ((pyuv)[1] - 128) - 11698 * ((pyuv)[3] - 128)) >> 14; \
