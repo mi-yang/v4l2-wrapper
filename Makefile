@@ -29,6 +29,7 @@ CFLAGS+=$(INCS)
 .PHONY: all clean
 all:OUT_DIR $(TARGET)
 
+
 OUT_DIR:
 	@echo "create output dir obj"
 	$(shell mkdir -p obj)
